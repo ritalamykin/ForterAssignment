@@ -1,6 +1,6 @@
 from asyncore import write
 from datetime import datetime
-from numpy import swapaxes
+from numpy import inner, swapaxes
 import pandas as pd
 import csv
 import jsonlines
@@ -36,31 +36,52 @@ def create_nested_entries_helper(row_dict, field_list, new_field):
     inner_dic = {field: row_dict[field] for field in field_list}
     for k in field_list:
         row_dict.pop(k, None)
-    row_dict[new_field] = inner_dic
+    if (new_field == "accountOwner"):
+        row_dict[new_field] = inner_dic
+    elif (new_field == "cartItems"):
+        li = []
+        li.append(inner_dic)
+        row_dict[new_field] = li
 
 
 def merge_file_into_json(json1, json2):
     with jsonlines.open(json1) as tmp_reader, jsonlines.open(json2) as input_reader, jsonlines.open('final.jsonl', mode='w') as writer:
-        input = input_reader.read()
-        tmp = tmp_reader.read()
-        while tmp != '' and input != '':
-            try:
-                if tmp["orderId"] == input["orderId"]:
-                    writer.write(inner_join_entries(tmp, input, 'orderId'))
-                    tmp = tmp_reader.read()
-                    input = input_reader.read()
-                elif tmp["orderId"] < input["orderId"]:
-                    while (tmp != '' and tmp["orderId"] < input["orderId"]):
-                        line_to_write = add_default_entries(tmp)
-                        writer.write(line_to_write)
-                        tmp = tmp_reader.read()
-                else:
-                    while (input != '' and tmp["orderId"] > input["orderId"]):
-                        line_to_write = add_default_entries(input)
-                        writer.write(line_to_write)
-                        input = input_reader.read()
-            except EOFError:
+        tmp_iter = tmp_reader.iter(type=dict)
+        input_iter = input_reader.iter(type=dict)
+        (tmp, input) = ('', '')
+        while tmp != None and input != None:
+            tmp = next(tmp_iter, None)
+            input = next(input_iter, None)
+            if tmp["orderId"] == input["orderId"]:
                 break
+            else:
+                line_to_write = add_default_entries(input)
+                writer.write(line_to_write)
+                input = next(input_iter, None)
+        while tmp != None and input != None:
+            if tmp["orderId"] == input["orderId"]:
+                writer.write(inner_join_entries(tmp, input, 'orderId'))
+                tmp = next(tmp_iter, None)
+                input = next(input_iter, None)
+            elif tmp["orderId"] < input["orderId"]:
+                while (tmp != None and tmp["orderId"] < input["orderId"]):
+                    line_to_write = add_default_entries(tmp)
+                    writer.write(line_to_write)
+                    tmp = next(tmp_iter, None)
+            else:
+                while (input != None and tmp["orderId"] > input["orderId"]):
+                    line_to_write = add_default_entries(input)
+                    writer.write(line_to_write)
+                    input = next(input_iter, None)
+        # Dump last entries
+        while (input != None):
+            line_to_write = add_default_entries(input)
+            writer.write(line_to_write)
+            input = next(input_iter, None)
+        while (tmp != None):
+            line_to_write = add_default_entries(tmp)
+            writer.write(line_to_write)
+            tmp = next(tmp_iter, None)
 
 
 def inner_join_entries(tmp, input, idenifier_field):
